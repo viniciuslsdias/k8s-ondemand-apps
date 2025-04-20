@@ -9,7 +9,7 @@ should_process() {
   local ns=$1
   for excluded in $NAMESPACES_TO_EXCLUDE; do
     if [[ "$excluded" == "$ns" ]]; then
-      return 1 # 1 = true
+      return 1 # 1 = false
     fi
   done
   return 0 # 0 = true
