@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cost-saver
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cost-saver-sa
+  namespace: cost-saver
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cost-saver
+rules:
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  - deployments/scale
+  verbs:
+  - list
+  - get
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cost-saver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cost-saver
+subjects:
+- kind: ServiceAccount
+  name: cost-saver-sa
+  namespace: cost-saver
+---
+apiVersion: v1
+data:
+  scale_script.sh: |-
+    #!/bin/bash
+
+    # List of all deployments in the format deployment_name:namespace
+    ALL_DEPLOYMENTS=$(kubectl get deploy -A -o jsonpath="{range .items[*]}{.metadata.name}:{.metadata.namespace}{'\n'}{end}")
+    # NAMESPACES_TO_EXCLUDE="kube-system cost-saver"
+    # REPLICAS_COUNT=0
+
+    should_process() {
+      local ns=$1
+      for excluded in $NAMESPACES_TO_EXCLUDE; do
+        if [[ "$excluded" == "$ns" ]]; then
+          return 1 # 1 = false
+        fi
+      done
+      return 0 # 0 = true
+    }
+
+    for deployment_namespace in $ALL_DEPLOYMENTS; do
+
+      deployment=${deployment_namespace%%:*}
+      namespace=${deployment_namespace#*:}
+
+      if should_process $namespace ; then
+        echo "kubectl scale deployment $deployment --replicas=$REPLICAS_COUNT -n $namespace"
+        kubectl scale deployment $deployment --replicas=$REPLICAS_COUNT -n $namespace
+        echo "" # Skip a line
+      fi
+    done
+kind: ConfigMap
+metadata:
+  name: scale-script
+  namespace: cost-saver
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: startup
+  namespace: cost-saver
+spec:
+  schedule: '0 11 * * 1-5' # At 11:00 UTC on every day-of-week from Monday through Friday. (8h UTC-3)
+  jobTemplate:
+    metadata:
+      name: startup
+    spec:
+      ttlSecondsAfterFinished: 100
+      template:
+        metadata:
+        spec:
+          serviceAccount: cost-saver-sa
+          containers:
+          - image: bitnami/kubectl:1.32.3
+            name: startup
+            command: ["/bin/bash", "-c"]
+            args: ["REPLICAS_COUNT=$REPLICAS_COUNT NAMESPACES_TO_EXCLUDE=$NAMESPACES_TO_EXCLUDE /tmp/script/scale_script.sh"]
+            volumeMounts:
+            - name: scale-script
+              mountPath: /tmp/script
+            env:
+            - name: NAMESPACES_TO_EXCLUDE
+              value: "kube-system cost-saver"
+            - name: REPLICAS_COUNT
+              value: "1"
+          volumes:
+          - name: scale-script
+            configMap:
+              name: scale-script
+              defaultMode: 0777
+          restartPolicy: OnFailure
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shutdown
+  namespace: cost-saver
+spec:
+  schedule: '0 21 * * 1-5' # At 21:00 UTC on every day-of-week from Monday through Friday. (18h UTC-3)
+  jobTemplate:
+    metadata:
+      name: shutdown
+    spec:
+      ttlSecondsAfterFinished: 100
+      template:
+        metadata:
+        spec:
+          serviceAccount: cost-saver-sa
+          containers:
+          - image: bitnami/kubectl:1.32.3
+            name: shutdown
+            command: ["/bin/bash", "-c"]
+            args: ["REPLICAS_COUNT=$REPLICAS_COUNT NAMESPACES_TO_EXCLUDE=$NAMESPACES_TO_EXCLUDE /tmp/script/scale_script.sh"]
+            volumeMounts:
+            - name: scale-script
+              mountPath: /tmp/script
+            env:
+            - name: NAMESPACES_TO_EXCLUDE
+              value: "kube-system cost-saver"
+            - name: REPLICAS_COUNT
+              value: "0"
+          volumes:
+          - name: scale-script
+            configMap:
+              name: scale-script
+              defaultMode: 0777
+          restartPolicy: OnFailure
