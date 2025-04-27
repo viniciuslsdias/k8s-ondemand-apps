@@ -16,7 +16,7 @@ Let us take a closer look at how to set up a scheduled job that turns all applic
 
 ### Diving into the Scheduler
 
-The scheduler relies on several components to function properly. All necessary resources such as the ServiceAccount, ClusterRole, ClusterRoleBinding, and others are defined in the manifests.yaml file. By simply applying this file, the CronJob and its dependencies will be set up and start working as expected. However, two parts of the code are particularly worth highlighting: the shell script and the CronJob definition itself.
+The scheduler relies on several components to function properly. All necessary resources such as the ServiceAccount, ClusterRole, ClusterRoleBinding, and others are defined in the `manifests.yaml` file. By simply applying this file, the CronJob and its dependencies will be set up and start working as expected. However, two parts of the code are particularly worth highlighting: the shell script and the CronJob definition itself.
 
 A single shell script is used by both the startup and shutdown CronJobs. It includes a variable called `REPLICAS_COUNT`, which is set to zero during shutdown and to one during startup. The script then iterates over the `ALL_DEPLOYMENTS` list, which contains deployment names and their corresponding namespaces in the format `deployment_name:namespace`. Inside the loop, a function named `should_process` is called to determine whether each deployment should be updated. This function checks if the deployment's namespace is in the `NAMESPACES_TO_EXCLUDE` variable, which contains Kubernetes operational namespaces and other namespaces not desired to be updated. Deployments not excluded by this check have their replica count modified.
 
